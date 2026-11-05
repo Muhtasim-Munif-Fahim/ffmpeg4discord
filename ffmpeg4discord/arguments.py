@@ -1,5 +1,6 @@
 """Reads ff4d's command-line flags and config files."""
 
+import difflib
 import json
 import logging
 import socket
@@ -185,6 +186,28 @@ def _search_for_default_config(args: dict) -> dict:
     return args
 
 
+def _check_config(config: dict, file_path: Path, parser: ArgumentParser) -> None:
+    """
+    Reject a config file setting that the command line would reject: a key that is not one of the parser's
+    settings, or a value that is not one of a flag's choices. Calls `parser.error()`, which exits.
+    """
+    actions = {action.dest: action for action in parser._actions if action.dest != "help"}
+    for key, value in config.items():
+        if key not in actions:
+            message = f"{file_path.name} has an unknown setting {key!r}."
+            suggestion = difflib.get_close_matches(key.replace("-", "_"), actions, n=1)
+            if suggestion:
+                message += f" Did you mean {suggestion[0]!r}?"
+            parser.error(message)
+        choices = actions[key].choices
+        if choices is not None and value not in choices:
+            flag = "/".join(actions[key].option_strings)
+            parser.error(
+                f"{file_path.name}: argument {flag}: invalid choice: {value!r} "
+                f"(choose from {', '.join(map(str, choices))})"
+            )
+
+
 def _merge_config_args(args: dict, parser: ArgumentParser, argv: list[str] | None = None) -> dict:
     """
     Make the config file's values the parser's defaults, then parse the command line again.
@@ -198,6 +221,7 @@ def _merge_config_args(args: dict, parser: ArgumentParser, argv: list[str] | Non
         if file_path not in configs:
             configs.add(file_path)
             config = load_config(file_path)
+            _check_config(config, file_path, parser)
             args["config"] = config.get("config")
             defaults = {**config, **defaults}  # a config file beats the one it points to
     if defaults:

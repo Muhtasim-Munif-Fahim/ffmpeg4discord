@@ -170,7 +170,7 @@ def test_merge_config_args_applies_config_values(parser, write_config):
     config = {
         "output": "mydir",
         "audio_br": 128,
-        "codec": "vp9-speed",
+        "codec": "vp9",
         "filename_times": True,
         "from": "00:00:10",
         "framerate": 60,
@@ -205,10 +205,45 @@ def test_merge_config_args_command_line_beats_config(parser, write_config, confi
     assert result[key] == expected
 
 
-def test_merge_config_args_keeps_keys_that_are_not_flags(parser, write_config):
+def test_merge_config_args_rejects_unknown_key(parser, write_config, capsys):
+    argv = ["file.mp4", "--config", str(write_config({"target-filesize": 20}))]
+    with pytest.raises(SystemExit):
+        _merge_config_args(vars(parser.parse_args(argv)), parser, argv)
+    err = capsys.readouterr().err
+    assert "config.json has an unknown setting 'target-filesize'" in err
+    assert "Did you mean 'target_filesize'?" in err
+
+
+def test_merge_config_args_rejects_unknown_key_without_suggestion(parser, write_config, capsys):
     argv = ["file.mp4", "--config", str(write_config({"something_else": 1}))]
+    with pytest.raises(SystemExit):
+        _merge_config_args(vars(parser.parse_args(argv)), parser, argv)
+    err = capsys.readouterr().err
+    assert "config.json has an unknown setting 'something_else'." in err
+    assert "Did you mean" not in err
+
+
+@pytest.mark.parametrize("codec", ["libvpx-vp9", "bogus"])
+def test_merge_config_args_rejects_invalid_codec(parser, write_config, capsys, codec):
+    argv = ["file.mp4", "--config", str(write_config({"codec": codec}))]
+    with pytest.raises(SystemExit):
+        _merge_config_args(vars(parser.parse_args(argv)), parser, argv)
+    err = capsys.readouterr().err
+    assert f"config.json: argument -c/--codec: invalid choice: {codec!r}" in err
+
+
+def test_merge_config_args_rejects_invalid_codec_in_followed_config(parser, write_config, capsys):
+    inner = write_config({"codec": "libvpx-vp9"}, name="inner.json")
+    argv = ["file.mp4", "--config", str(write_config({"config": str(inner)}))]
+    with pytest.raises(SystemExit):
+        _merge_config_args(vars(parser.parse_args(argv)), parser, argv)
+    assert "inner.json: argument -c/--codec: invalid choice" in capsys.readouterr().err
+
+
+def test_merge_config_args_accepts_valid_codec(parser, write_config):
+    argv = ["file.mp4", "--config", str(write_config({"codec": "vp9"}))]
     result = _merge_config_args(vars(parser.parse_args(argv)), parser, argv)
-    assert result["something_else"] == 1
+    assert result["codec"] == "vp9"
 
 
 def test_merge_config_args_follows_config_key(parser, write_config):
